@@ -1103,6 +1103,12 @@ func (p *parser) parseString() (any, error) {
 				}
 				if nextChar == ',' && p.context.current != nil && *p.context.current == contextObjectValue {
 					i++
+					i = p.scrollWhitespaces(i)
+					// Skip the next key's opening quote so this scan finds its
+					// closing quote instead of stopping at the first character.
+					if ch, ok := p.getCharAt(i); ok && ch == ldelim {
+						i++
+					}
 					i = p.skipToCharacter(rdelim, i)
 					i++
 					i = p.scrollWhitespaces(i)
