@@ -981,6 +981,7 @@ func (p *parser) parseString() (any, error) {
 				break
 			}
 		}
+		sourceChar := char
 		stringAcc = append(stringAcc, char)
 		p.index++
 		char, ok = p.getCharAt(0)
@@ -990,7 +991,7 @@ func (p *parser) parseString() (any, error) {
 			}
 			break
 		}
-		if len(stringAcc) > 0 && stringAcc[len(stringAcc)-1] == '\\' {
+		if sourceChar == '\\' {
 			p.log("Found a stray escape sequence, normalizing it")
 			if char == rdelim || char == 't' || char == 'n' || char == 'r' || char == 'b' || char == 'f' || char == '/' || char == '\\' {
 				stringAcc = stringAcc[:len(stringAcc)-1]
@@ -1002,7 +1003,10 @@ func (p *parser) parseString() (any, error) {
 				}
 				p.index++
 				char, ok = p.getCharAt(0)
-				for ok && len(stringAcc) > 0 && stringAcc[len(stringAcc)-1] == '\\' && (char == rdelim || char == '\\') {
+				// A decoded backslash is string content. Only consume another
+				// quote here when the source suggests it is a misplaced quote,
+				// as in the malformed escaped_quotes regression case.
+				if ok && char == rdelim && p.shouldTreatQuoteAsContentAfterEscapedBackslash() {
 					stringAcc = append(stringAcc[:len(stringAcc)-1], char)
 					p.index++
 					char, ok = p.getCharAt(0)
@@ -1262,6 +1266,34 @@ func (p *parser) parseString() (any, error) {
 		}
 	}
 	return string(stringAcc), nil
+}
+
+// shouldTreatQuoteAsContentAfterEscapedBackslash keeps the malformed quote
+// recovery used by escaped_quotes without treating a decoded backslash as a
+// pending source escape. A quote followed by a structural delimiter closes
+// the string; a quote before more content remains part of the repaired value.
+func (p *parser) shouldTreatQuoteAsContentAfterEscapedBackslash() bool {
+	for offset := 1; ; offset++ {
+		char, ok := p.getCharAt(offset)
+		if !ok {
+			return false
+		}
+		if unicode.IsSpace(char) {
+			continue
+		}
+		switch {
+		case p.context.current == nil:
+			return true
+		case *p.context.current == contextObjectKey:
+			return char != ':'
+		case *p.context.current == contextObjectValue:
+			return char != ',' && char != '}'
+		case *p.context.current == contextArray:
+			return char != ',' && char != ']'
+		default:
+			return true
+		}
+	}
 }
 
 // readSurrogatePair consumes the \uXXXX escape that follows a surrogate, so a
